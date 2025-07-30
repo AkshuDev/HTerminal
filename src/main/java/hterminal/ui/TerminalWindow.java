@@ -2,13 +2,19 @@ package hterminal.ui;
 
 import javax.swing.*;
 import javax.swing.text.DefaultCaret;
+
 import java.awt.*;
+import java.awt.image.*;
 import java.util.*;
+
+import hrenderpipeline.dynamicrender.DynamicRenderer;
 
 import hterminal.ConfigParser;
 
 public class TerminalWindow extends JFrame {
 	private JTextArea terminalArea;
+	private JLayeredPane terminalPanel;
+
 	private ConfigParser config;
 	private int width;
 	private int height;
@@ -16,6 +22,9 @@ public class TerminalWindow extends JFrame {
 	private String font;
 	private float opacity;
 	private boolean blur;
+
+	private BufferedImage sharedGraphicsBuff;
+	private DynamicRenderer graphicsRenderer;
 
 	public TerminalWindow(ConfigParser config, int w, int h, int font_size, String font, float opacity, boolean blur) {
 		this.config = config;
@@ -38,17 +47,42 @@ public class TerminalWindow extends JFrame {
 		setDefaultCloseOperation(EXIT_ON_CLOSE);
 		setUndecorated(false);
 
+		// Init our Renderer
+		this.graphicsRenderer = new DynamicRenderer(width, height, 60);
+
+		graphicsRenderer.setBounds(0, 0, width, height);
+		graphicsRenderer.setOpaque(true);
+		graphicsRenderer.setBackground(Color.BLACK);
+		graphicsRenderer.setDoubleBuffered(true);
+
+		this.sharedGraphicsBuff = graphicsRenderer.GetBuffer();
+
 		// Set Opacity if it is supported
 		if (GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice().isWindowTranslucencySupported(GraphicsDevice.WindowTranslucency.TRANSLUCENT)) {
 			setOpacity(opacity);
 		}
 
+		// Setup main Panel
+		this.terminalPanel = new JLayeredPane();
+		terminalPanel.setOpaque(true); // (currently for acting as a base) 
+		terminalPanel.setBackground(Color.BLACK); // BASE color
+		terminalPanel.setLayout(null); // No layout manager
+		
+		setContentPane(terminalPanel);
+
+		terminalPanel.add(graphicsRenderer, JLayeredPane.DEFAULT_LAYER);
+
+
 		// Main Terminal Area
 		terminalArea = new JTextArea();
+		terminalArea.setBounds(0, 0, width, height);
+		terminalArea.setOpaque(false);
 		terminalArea.setFont(new Font(font, Font.PLAIN, font_size));
 		terminalArea.setLineWrap(true);
 		terminalArea.setWrapStyleWord(true);
 		terminalArea.setEditable(false);
+
+		terminalPanel.add(terminalArea, JLayeredPane.DRAG_LAYER);
 
 		// Foreground & Background
 		try {
@@ -76,15 +110,23 @@ public class TerminalWindow extends JFrame {
 			JScrollPane scrollPane = new JScrollPane(terminalArea);
 			scrollPane.setBorder(BorderFactory.createEmptyBorder());
 
-			add(scrollPane, BorderLayout.CENTER);
+			terminalPanel.add(scrollPane, JLayeredPane.PALETTE_LAYER);
 		}
-
+		
+		pack();
 		setVisible(true);
 
 		// Apply blur
 		if (blur) {
 			applyBlurEffect();
 		}
+
+		terminalPanel.revalidate();
+		terminalPanel.repaint();
+
+		graphicsRenderer.Ignite();
+
+		renderToWindow();
 		
 		if (config.getBoolean("print-welcome", true)) {
 			printWelcome();
@@ -95,15 +137,63 @@ public class TerminalWindow extends JFrame {
 		println("Welcome to HTerminal");
 	}
 
-	private void println(String message) {
+	public void println(String message) {
 		terminalArea.append(message + '\n');
+		renderToWindow();
 	}
 
-	private void print(String message) {
+	public void print(String message) {
 		terminalArea.append(message);
+		renderToWindow();
 	}
 
 	private void applyBlurEffect() {
 		System.out.println("Sorry, blur is not added yet!");
+	}
+
+	public void renderToWindow() {
+		synchronized (sharedGraphicsBuff) {
+			Graphics2D g2d = sharedGraphicsBuff.createGraphics();
+
+			try {
+				SwingUtilities.invokeLater(() -> {
+					terminalPanel.setSize(graphicsRenderer.getWidth(), graphicsRenderer.getHeight());
+					terminalPanel.doLayout();
+
+					terminalPanel.printAll(g2d);
+				});
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+
+			g2d.dispose();
+		}
+
+		SwingUtilities.invokeLater(() -> {
+			graphicsRenderer.revalidate();
+			graphicsRenderer.repaint();
+		});
+	}
+
+	private synchronized void resizeBuffImageIfNeeded() {
+		int newWidth = getWidth();
+		int newHeight = getHeight();
+
+		if (newWidth <= graphicsRenderer.getWidth() && newHeight <= graphicsRenderer.getHeight()) {
+			return;
+		}
+
+		BufferedImage newBuff = new BufferedImage(
+			Math.max(newWidth, graphicsRenderer.getWidth()),
+			Math.max(newHeight, graphicsRenderer.getHeight()),
+			BufferedImage.TYPE_INT_ARGB
+		);
+
+		Graphics2D g2 = newBuff.createGraphics();
+		g2.drawImage(sharedGraphicsBuff, 0, 0, null);
+		g2.dispose();
+
+		graphicsRenderer.SetBuffer(newBuff);
+		sharedGraphicsBuff = graphicsRenderer.GetBuffer();
 	}
 }
