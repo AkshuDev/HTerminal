@@ -1,0 +1,52 @@
+plugins {
+	id 'java'
+	id 'application'
+}
+
+group = 'hterminal'
+version = '0.1.0'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(17)
+	}
+}
+
+application {
+	mainClass = 'hterminal.HTerminal'
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	def javafxVersion = '21'
+
+	implementation "org.openjfx:javafx-controls:${javafxVersion}"
+	implementation "org.openjfx:javafx-graphics:${javafxVersion}"
+	implementation "org.openjfx:javafx-base:${javafxVersion}"
+	
+	implementation 'com.formdev:flatlaf:3.2' // modern java look and feel
+
+	// Logging framework
+	implementation 'org.slf4j:slf4j-simple:2.0.9'
+
+	// Testing
+	testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.0'
+	testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.0'
+}
+
+test {
+	useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile) {
+	options.encoding = 'UTF-8'
+}
+
+tasks.run {
+	if (project.hasProperty("args")) {
+		args project.args.split(',')
+	}
+}
